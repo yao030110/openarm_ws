@@ -1,0 +1,9 @@
+ros2 topic pub  /left_joint_trajectory_controller/joint_trajectory trajectory_msgs/msg/JointTrajectory '{
+    "joint_names": ["openarm_left_joint1", "openarm_left_joint2", "openarm_left_joint3", "openarm_left_joint4", "openarm_left_joint5", "openarm_left_joint6", "openarm_left_joint7"],
+    "points": [
+        {
+            "positions": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            "time_from_start": {"sec": 3, "nanosec": 0}
+        }
+    ]
+}'
