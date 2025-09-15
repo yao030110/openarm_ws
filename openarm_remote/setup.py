@@ -13,6 +13,9 @@ setup(
         ('share/' + package_name + '/config', glob('config/*.yaml')),
         ('share/' + package_name + '/launch', glob('launch/*.launch.py')),
         ('share/' + package_name + '/launch', glob('launch/*.launch.yml')),
+        ('share/' + package_name + '/record' , glob('openarm_remote/record/*.avsc')),
+        ('share/' + package_name + '/config' , glob('openarm_remote/config/*.yaml')),
+
     ],
     install_requires=['setuptools'],
     zip_safe=True,

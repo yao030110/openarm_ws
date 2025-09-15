@@ -3,6 +3,7 @@ import meshcat.geometry as mg
 import numpy as np
 import pinocchio as pin
 import time
+import yaml
 from pinocchio import casadi as cpin
 from pinocchio.visualize import MeshcatVisualizer
 from ament_index_python.packages import get_package_share_directory
@@ -11,15 +12,34 @@ import os
 
 class General_ArmIK:
     def __init__(self, Visualization=False, filter=False):
+        # __file__ 是当前脚本(mod_ik.py)的路径
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        package_root_dir = os.path.dirname(script_dir)
+        config_path = os.path.join(package_root_dir, 'config', 'robot_control.yaml')
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+            
         np.set_printoptions(precision=5, suppress=True, linewidth=200)
         self.filter = filter
         self.Visualization = Visualization
-        assets_package = get_package_share_directory('openarm_description') 
+        self.robot_ik = config['robot_for_ik']
+        assets_package_path = get_package_share_directory(self.robot_ik['package_name'])
+        urdf_full_path = assets_package_path + self.robot_ik['urdf_path']
         self.robot = pin.RobotWrapper.BuildFromURDF(
-            assets_package + '/urdf/robot/openarm_single_control.urdf',
-            assets_package 
+            urdf_full_path,
+            assets_package_path 
         )
-        self.mixed_jointsToLockIDs = []
+        # self.mixed_jointsToLockIDs = []
+        locked_joint_names = self.robot_ik.get('locked_joints') 
+
+        # 检查获取到的值是否为None或者是一个空列表
+        if locked_joint_names:
+            self.mixed_jointsToLockIDs = [
+                self.robot.model.getJointId(joint_name) for joint_name in locked_joint_names
+            ]
+        else:
+            # 如果是None或空列表，直接赋值为空列表
+            self.mixed_jointsToLockIDs = []
 
         self.reduced_robot = self.robot.buildReducedRobot(
             list_of_joints_to_lock=self.mixed_jointsToLockIDs,
@@ -38,7 +58,7 @@ class General_ArmIK:
         cpin.framesForwardKinematics(self.cmodel, self.cdata, self.cq)
 
         # Get the hand joint ID and define the error function
-        self.hand_id = self.reduced_robot.model.getFrameId("openarm_hand_tcp")
+        self.hand_id = self.reduced_robot.model.getFrameId(self.robot_ik['end_effector_frame'])
 
         self.translational_error = casadi.Function(
             "translational_error",
@@ -104,11 +124,11 @@ class General_ArmIK:
             self.vis.initViewer(open=False)
             self.vis.loadViewerModel("pinocchio")
             self.vis.displayFrames(
-                True, frame_ids=[107, 108], axis_length=0.15, axis_width=5)
+                True, frame_ids=[0, self.hand_id], axis_length=0.15, axis_width=5)
             self.vis.display(pin.neutral(self.reduced_robot.model))
 
             # Enable the display of end effector target frames with short axis lengths and greater width.
-            frame_viz_names = ['arm_ee']
+            frame_viz_names = [self.robot_ik['end_effector_frame']]
             FRAME_AXIS_POSITIONS = (
                 np.array([[0, 0, 0], [1, 0, 0],
                           [0, 0, 0], [0, 1, 0],
@@ -150,7 +170,7 @@ class General_ArmIK:
         self.opti.set_initial(self.var_q, self.init_data)
 
         if self.Visualization:
-            self.vis.viewer['arm_ee'].set_transform(wrist)   # for visualization
+            self.vis.viewer[self.robot_ik['end_effector_frame']].set_transform(wrist)   # for visualization
         self.opti.set_value(self.param_tf, wrist)
         self.opti.set_value(self.var_q_last, self.init_data)  # for smooth
         try:
@@ -214,8 +234,10 @@ if __name__ == "__main__":
     rotation_speed = 0.005
     noise_amplitude_translation = 0.001
     noise_amplitude_rotation = 0.01
+    R_down = pin.utils.rotate('x', np.pi)  # 获取绕X轴180度的旋转矩阵
+    q_down = pin.Quaternion(R_down)  
     tf_target = pin.SE3(
-        pin.Quaternion(1, 0, 0, 0),
+        q_down,
         np.array([0.20, 0.20, 0.1]),
     )
     # 一个向下的姿态
@@ -229,12 +251,16 @@ if __name__ == "__main__":
                 np.cos(np.random.normal(0, noise_amplitude_rotation) / 2), 0, np.random.normal(0, noise_amplitude_rotation / 2), 0).normalized()  # y bias
             if step <= 120:
                 angle = rotation_speed * step
-                tf_target.rotation = (rotation_noise * pin.Quaternion(np.cos(angle / 2), 0, np.sin(angle / 2), 0)).toRotationMatrix()  # y axis
-                tf_target.translation += (np.array([0.001,  0.001, 0.001]) + np.random.normal(0, noise_amplitude_translation, 3))
+                # 在“Z向下”的基础上，绕 Y 轴旋转（即左右摆动）
+                R_y = pin.Quaternion(np.cos(angle / 2), 0, np.sin(angle / 2), 0).toRotationMatrix()
+                tf_target.rotation = (rotation_noise * pin.Quaternion(R_y)).toRotationMatrix()
+                tf_target.translation += (np.array([0.001, 0.001, 0.001]) + np.random.normal(0, noise_amplitude_translation, 3))
+
             else:
                 angle = rotation_speed * (240 - step)
-                tf_target.rotation = (rotation_noise * pin.Quaternion(np.cos(angle / 2), 0, np.sin(angle / 2), 0)).toRotationMatrix()  # y axis
-                tf_target.translation -= (np.array([0.001,  0.001, 0.001]) + np.random.normal(0, noise_amplitude_translation, 3))
+                R_y = pin.Quaternion(np.cos(angle / 2), 0, np.sin(angle / 2), 0).toRotationMatrix()
+                tf_target.rotation = (rotation_noise * pin.Quaternion(R_y)).toRotationMatrix()
+                tf_target.translation -= (np.array([0.001, 0.001, 0.001]) + np.random.normal(0, noise_amplitude_translation, 3))
 
             ik.solve_ik(tf_target.homogeneous)
 

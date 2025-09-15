@@ -4,25 +4,34 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64MultiArray
 from rclpy.node import Node
 import rclpy
+import yaml
+import os
 
 class General_ArmController:
     def __init__(self, node: Node):
         print("Initialize ArmController...")
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        package_root_dir = os.path.dirname(script_dir)
+        config_path = os.path.join(package_root_dir, 'config', 'robot_control.yaml')
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        self.robot_arm = config['robot_for_arm']
+        
         self.node = node
-        self.arm_velocity_limit = np.array([5.0, 5.0, 5.0, 6.0, 7.0, 7.0, 10.0])
-        self.control_dt = 1.0 / 120.0
+        self.arm_velocity_limit = np.array(self.robot_arm['velocity_limits'])
+        self.control_dt = 1.0 / self.robot_arm['control_frequency_hz']
         self.states = {
             'position': np.zeros(7),
         }
         self.joint_state_sub = node.create_subscription(
             JointState, 
-            'joint_states', 
+            self.robot_arm['joint_state_sub'], 
             self._joint_state_callback, 
             10
         )
         self.command_pub = node.create_publisher(
             JointState, 
-            'target_joint_states', 
+            self.robot_arm['joint_targer_pub'], 
             10
         )
         self.q_target = np.zeros(7)

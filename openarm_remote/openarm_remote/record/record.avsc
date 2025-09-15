@@ -1,0 +1,53 @@
+{
+    "namespace": "record.avro",
+    "type": "record",
+    "name": "User",
+    "fields": [
+        {
+            "name": "timestamp",
+            "type": "double"
+        },
+        {
+            "name": "ee_pose",
+            "type": {
+                "type": "array",
+                "items": "double"
+            }
+        },
+        {
+            "name": "ee_rot",
+            "type": {
+                "type": "array",
+                "items": "double"
+            }
+        },
+        {
+            "name": "position",
+            "type": {
+                "type": "array",
+                "items": "double"
+            }
+        },
+        {
+            "name": "action",
+            "type": {
+                "type": "array",
+                "items": "double"
+            }
+        },
+        {
+            "name": "tag_tube",
+            "type": {
+                "type": "array",
+                "items": "double"
+            }
+        },
+        {
+            "name": "table",
+            "type": {
+                "type": "array",
+                "items": "double"
+            }
+        }
+    ]
+}
