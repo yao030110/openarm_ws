@@ -1,18 +1,44 @@
 # 机器人模型相关参数,给同名文件夹下使用
 robot_for_ik:
   package_name: 'openarm_description'
-  urdf_path: '/urdf/robot/openarm_single_control.urdf'
+  urdf_path: '/urdf/robot/openarm_double.urdf'
+  # '/urdf/robot/openarm_double.urdf'
+  # '/urdf/robot/openarm_single_control.urdf'
   # 需要锁定的关节列表，如果不需要锁定任何关节，则留空 []
+  #可以先去ik读一下模型加载了什么关节
   locked_joints: #没有锁定的话直接注释掉下面的
-    - "openarm_finger_joint1"
-    - "openarm_finger_joint2"
-  # 末端执行器的frame名称
-  end_effector_frame: "openarm_hand_tcp"
+    # - "openarm_finger_joint1"
+    # - "openarm_finger_joint2"
+    - "openarm_right_joint1"
+    - "openarm_right_joint2"
+    - "openarm_right_joint3"
+    - "openarm_right_joint4" 
+    - "openarm_right_joint5"
+    - "openarm_right_joint6"
+    - "openarm_right_joint7"
+    - "openarm_left_finger_joint1"
+    - "openarm_left_finger_joint2"
+    - "openarm_right_finger_joint1"
+    - "openarm_right_finger_joint2"
+  
 
+
+  # 末端执行器的frame名称
+  end_effector_frame: "openarm_left_hand_tcp"
+#  "openarm_hand_tcp"
 robot_for_arm:
   
   joint_state_sub: '/joint_states'
-  joint_targer_pub: '/joint_states'
+  joint_targer_pub: '/left_forward_position_controller/commands'
+  # '/forward_position_controller/commands'
   
-  control_frequency_hz: 120
-  velocity_limits: [5.0, 5.0, 5.0, 6.0, 7.0, 7.0, 10.0]
+  control_frequency_hz: 100
+  velocity_limits: [8.0, 8.0, 8.0, 8.0, 10.0, 10.0, 15.0]
+  read_joints: #读取的关节列表
+    - "openarm_left_joint1"
+    - "openarm_left_joint2"
+    - "openarm_left_joint3"
+    - "openarm_left_joint4"
+    - "openarm_left_joint5"
+    - "openarm_left_joint6"
+    - "openarm_left_joint7"

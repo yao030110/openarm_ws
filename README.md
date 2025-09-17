@@ -1,1 +1,4 @@
 # openarm_ws
+Left臂为can1，right臂为can0
+这个版本拿来存一下相对普适化的摇操机械臂代码，放在openarm_remote中，后续要考虑双臂切换摇操就不普适了
+robot_control.yaml可以修改底层代码，就不需要修改mod_ik和mod_arm了

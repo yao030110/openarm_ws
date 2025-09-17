@@ -13,9 +13,9 @@ import os
 class General_ArmIK:
     def __init__(self, Visualization=False, filter=False):
         # __file__ 是当前脚本(mod_ik.py)的路径
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        package_root_dir = os.path.dirname(script_dir)
-        config_path = os.path.join(package_root_dir, 'config', 'robot_control.yaml')
+        package_share_directory = get_package_share_directory('openarm_remote')
+
+        config_path = os.path.join(package_share_directory, 'config', 'robot_control.yaml')
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
             
@@ -165,6 +165,12 @@ class General_ArmIK:
     #     return robot_left_pose, robot_right_pose
 
     def solve_ik(self, wrist, current_lr_arm_motor_q=None, current_lr_arm_motor_dq=None):
+        # 在求解前先检测目标是否可达
+        # if not self.is_target_reachable(wrist):
+        #     # 目标不可达，进行限制或警告
+        #     wrist = self.clamp_target_to_workspace(wrist)
+        #     print("Warning: Target outside workspace, clamping to boundary")
+
         if current_lr_arm_motor_q is not None:
             self.init_data = current_lr_arm_motor_q
         self.opti.set_initial(self.var_q, self.init_data)
@@ -238,7 +244,7 @@ if __name__ == "__main__":
     q_down = pin.Quaternion(R_down)  
     tf_target = pin.SE3(
         q_down,
-        np.array([0.20, 0.20, 0.1]),
+        np.array([0.4, 0.0, 0.4]),
     )
     # 一个向下的姿态
     user_input = input(

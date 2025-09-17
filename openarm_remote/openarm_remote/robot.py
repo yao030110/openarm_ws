@@ -57,10 +57,28 @@ class Robot(Node):
     def step(self, action):
         if len(action) != 6:
             raise ValueError("Action must be of length 6")
+        
+        current_ee_pose, current_ee_rot = self.mod_ik.solve_fk(self.q)
 
-        self.target_ee_pose += action[:3] * 0.005
+        delta = self.target_ee_pose - current_ee_pose
+        distance = np.linalg.norm(delta)
+        if distance > 0.01:  # >5mm 就重置
+            self.target_ee_pose = current_ee_pose
+            # self.target_ee_rot = current_ee_rot
+        # current_euler = R.from_matrix(current_ee_rot).as_euler('xyz')
+        # target_euler = R.from_matrix(self.target_ee_rot).as_euler('xyz')
+        # # 计算绝对差值，取最大轴 —— 一步到位
+        # max_euler_diff = np.abs(target_euler - current_euler).max()
+        # # 阈值：10度 → 弧度（预计算，避免运行时 deg2rad）
+        # MAX_ANGLE_DIFF_RAD = 0.1745  # = np.deg2rad(10) ≈ 10° in radians
+        # if max_euler_diff > MAX_ANGLE_DIFF_RAD:
+        #     self.target_ee_rot = current_ee_rot
 
-        self.target_ee_rot = (R.from_matrix(self.target_ee_rot) *
+        self.target_ee_pose += action[:3]* 0.002    #* 0.005
+        
+        # self.target_ee_rot = (R.from_matrix(self.target_ee_rot) *
+        #                       R.from_euler('xyz', action[3:6] * 0.01)).as_matrix()
+        self.target_ee_rot = (R.from_matrix(current_ee_rot) *
                               R.from_euler('xyz', action[3:6] * 0.01)).as_matrix()
         ee = np.eye(4)
         ee[:3, 3] = self.target_ee_pose
