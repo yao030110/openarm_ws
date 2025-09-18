@@ -35,7 +35,8 @@ def main(args=None):
     #---
     tf2_buffer = tf2_ros.Buffer()
     tf2_ros.TransformListener(tf2_buffer, node)
-
+    
+    node.get_logger().info(f"Use arm {node.active_arm} ")
     save_dir = node.get_parameter("save_dir").get_parameter_value().string_value
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
@@ -98,7 +99,7 @@ def main(args=None):
             command = joystick.command
 
             try:
-                action_obs = node.step(action[:6])  
+                action_obs = node.step(arm_id=node.active_arm , action=action[:6])  
             except Exception as e:
                 pass
 
@@ -121,14 +122,21 @@ def main(args=None):
                 recording = False
             # Load Keyframe
             elif command[3] == 1:
-                node.get_logger().info(f"Keyframe {keyframe} loaded.")
-                # keyframe += 1
-                # keyframe %= len(KEYFRAMES)
-                # keyframe_data = KEYFRAMES[keyframe]
-                q = np.array([0.11010828 , 0.11387246 ,-0.22371638 ,-2.10449131 ,-0.02231137 , 2.14695302,0.65245617])
-
-                node.reset(q=q, waite_time=1.5)
-                node.get_logger().info(f"Keyframe {keyframe} move finished.")
+                current_time = node.get_clock().now().nanoseconds / 1e9  # 获取当前时间（秒）
+                if current_time - joystick.last_button_press_time > 1:  # 设置0.5秒的防抖时间
+                    joystick.last_button_press_time = current_time
+                    
+                    node.get_logger().info(f"Keyframe {keyframe} loaded.")
+                    # keyframe += 1
+                    # keyframe %= len(KEYFRAMES)
+                    # keyframe_data = KEYFRAMES[keyframe]
+                    # q = np.array([0.11010828 , 0.11387246 ,-0.22371638 ,-2.10449131 ,-0.02231137 , 2.14695302,0.65245617])
+                    if node.active_arm == "left":
+                        node.active_arm = "right"
+                        node.get_logger().info("<<<<< Switched to RIGHT arm control >>>>>")
+                    else: # 当前是 right
+                        node.active_arm = "left"
+                        node.get_logger().info("<<<<< Switched to LEFT arm control >>>>>")
                 rate.sleep()
                 continue
             
@@ -136,7 +144,8 @@ def main(args=None):
             #     rate.sleep()
             #     continue
             
-            obs = node.get_observation()
+            # obs = node.get_observation()
+
             # action_obs = node.step(action[:6])
             # # action_obs = node.step(action)
             # # node.get_logger().info(f"当前action: {action}") 

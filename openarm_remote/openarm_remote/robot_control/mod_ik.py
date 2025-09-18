@@ -11,18 +11,13 @@ from openarm_remote.utils.weighted_moving_filter import WeightedMovingFilter
 import os
 
 class General_ArmIK:
-    def __init__(self, Visualization=False, filter=False):
+    def __init__(self, config: dict ,Visualization=False, filter=False ):
         # __file__ 是当前脚本(mod_ik.py)的路径
-        package_share_directory = get_package_share_directory('openarm_remote')
-
-        config_path = os.path.join(package_share_directory, 'config', 'robot_control.yaml')
-        with open(config_path, 'r') as f:
-            config = yaml.safe_load(f)
-            
+       
         np.set_printoptions(precision=5, suppress=True, linewidth=200)
         self.filter = filter
         self.Visualization = Visualization
-        self.robot_ik = config['robot_for_ik']
+        self.robot_ik = config
         assets_package_path = get_package_share_directory(self.robot_ik['package_name'])
         urdf_full_path = assets_package_path + self.robot_ik['urdf_path']
         self.robot = pin.RobotWrapper.BuildFromURDF(
@@ -103,6 +98,7 @@ class General_ArmIK:
                 'print_level': 0,
                 'max_iter': 100,
                 'tol': 1e-6
+                # 'tol': 1e-5
             },
             'print_time': False,  # print or not
             # https://github.com/casadi/casadi/wiki/FAQ:-Why-am-I-getting-%22NaN-detected%22in-my-optimization%3F
@@ -235,42 +231,120 @@ class General_ArmIK:
 
 
 if __name__ == "__main__":
+    # from scipy.spatial.transform import Rotation as R
+    # package_share_directory = get_package_share_directory('openarm_remote')
+    # config_path = os.path.join(package_share_directory, 'config', 'robot_control.yaml')
+    # with open(config_path, 'r') as f:
+    #     full_config = yaml.safe_load(f)
+    # ik = General_ArmIK(Visualization=True,config=full_config['robot_right_ik'])
     from scipy.spatial.transform import Rotation as R
-    ik = General_ArmIK(Visualization=True)
-    rotation_speed = 0.005
-    noise_amplitude_translation = 0.001
-    noise_amplitude_rotation = 0.01
-    R_down = pin.utils.rotate('x', np.pi)  # 获取绕X轴180度的旋转矩阵
-    q_down = pin.Quaternion(R_down)  
-    tf_target = pin.SE3(
-        q_down,
-        np.array([0.4, 0.0, 0.4]),
-    )
-    # 一个向下的姿态
-    user_input = input(
-        "Please enter the start signal (enter 's' to start the subsequent program):\n")
-    if user_input.lower() == 's':
-        step = 0
-        while True:
-            # Apply rotation noise with bias towards y and z axes
-            rotation_noise = pin.Quaternion(
-                np.cos(np.random.normal(0, noise_amplitude_rotation) / 2), 0, np.random.normal(0, noise_amplitude_rotation / 2), 0).normalized()  # y bias
-            if step <= 120:
-                angle = rotation_speed * step
-                # 在“Z向下”的基础上，绕 Y 轴旋转（即左右摆动）
-                R_y = pin.Quaternion(np.cos(angle / 2), 0, np.sin(angle / 2), 0).toRotationMatrix()
-                tf_target.rotation = (rotation_noise * pin.Quaternion(R_y)).toRotationMatrix()
-                tf_target.translation += (np.array([0.001, 0.001, 0.001]) + np.random.normal(0, noise_amplitude_translation, 3))
+    import math
+    import sys
+    import termios
+    import tty
+    import select
+    
+    # 2. 把【仅用于测试的】辅助类定义在这里
+    class KBHit:
+        """
+        一个用于非阻塞式键盘监听的类。
+        它的所有逻辑都封装在 __main__ 块内，不会影响外部导入。
+        """
+        def __init__(self):
+            # 保存终端的原始设置
+            self.fd = sys.stdin.fileno()
+            try:
+                self.old_settings = termios.tcgetattr(self.fd)
+                # 设置终端为原始模式
+                tty.setraw(sys.stdin.fileno())
+            except termios.error:
+                print("Warning: Not a TTY, keyboard input will not work.")
+                self.old_settings = None
 
-            else:
-                angle = rotation_speed * (240 - step)
-                R_y = pin.Quaternion(np.cos(angle / 2), 0, np.sin(angle / 2), 0).toRotationMatrix()
-                tf_target.rotation = (rotation_noise * pin.Quaternion(R_y)).toRotationMatrix()
-                tf_target.translation -= (np.array([0.001, 0.001, 0.001]) + np.random.normal(0, noise_amplitude_translation, 3))
+        def __del__(self):
+            # 恢复终端的原始设置
+            if self.old_settings:
+                termios.tcsetattr(self.fd, termios.TCSADRAIN, self.old_settings)
 
-            ik.solve_ik(tf_target.homogeneous)
+        def kbhit(self):
+            # 检查是否有按键事件
+            if self.old_settings:
+                return select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], [])
+            return False
 
-            step += 1
-            if step > 240:
-                step = 0
-            time.sleep(0.1)
+        def getch(self):
+            # 获取按下的单个字符
+            if self.old_settings:
+                return sys.stdin.read(1)
+            return ''
+
+    # 3. 把【仅用于测试的】主逻辑放在这里
+    def main_interactive_test():
+        # --- 初始化 IK 求解器 ---
+        package_share_directory = get_package_share_directory('openarm_remote')
+        config_path = os.path.join(package_share_directory, 'config', 'robot_control.yaml')
+        with open(config_path, 'r') as f:
+            full_config = yaml.safe_load(f)
+        ik = General_ArmIK(config=full_config['robot_left_ik'], Visualization=True)
+
+        # --- 定义控制参数 ---
+        LINEAR_STEP = 0.01  # 每次按键平移的距离 (米)
+        ANGULAR_STEP = 0.05 # 每次按键旋转的角度 (弧度, 约3度)
+        LOOP_RATE = 30      # Hz, 控制循环频率
+
+        # --- 定义一个安全的初始位姿 ---
+        start_pos = np.array([0.4, 0.0, 0.4])
+        start_rot_matrix = R.from_euler('y', -np.pi / 2).as_matrix()
+        tf_target = pin.SE3(start_rot_matrix, start_pos)
+
+        # --- 打印操作说明 ---
+        print("\n" + "="*50)
+        print("Interactive IK Control Started.")
+        print("Press keys to move the end-effector. You do not need to press Enter.")
+        print("="*50)
+        print("  --- Translation ---       --- Rotation ---")
+        print("    w/s: +X / -X             u/j: +Pitch / -Pitch (Y-axis)")
+        print("    a/d: +Y / -Y             h/k: +Yaw / -Yaw (Z-axis)")
+        print("    q/e: +Z / -Z             y/i: +Roll / -Roll (X-axis)")
+        print("\n    x: Quit")
+        print("="*50 + "\n")
+
+        # --- 初始化并进入主循环 ---
+        kb = KBHit()
+        
+        print("Moving to initial pose...")
+        ik.solve_ik(tf_target.homogeneous)
+        time.sleep(2.0)
+        print("Ready to control.")
+
+        try:
+            while True:
+                if kb.kbhit():
+                    key = kb.getch()
+
+                    # 更新目标位姿
+                    if key == 'w': tf_target.translation[0] += LINEAR_STEP
+                    elif key == 's': tf_target.translation[0] -= LINEAR_STEP
+                    elif key == 'a': tf_target.translation[1] += LINEAR_STEP
+                    elif key == 'd': tf_target.translation[1] -= LINEAR_STEP
+                    elif key == 'q': tf_target.translation[2] += LINEAR_STEP
+                    elif key == 'e': tf_target.translation[2] -= LINEAR_STEP
+                    elif key == 'y': tf_target.rotation @= R.from_euler('x', ANGULAR_STEP).as_matrix()
+                    elif key == 'i': tf_target.rotation @= R.from_euler('x', -ANGULAR_STEP).as_matrix()
+                    elif key == 'u': tf_target.rotation @= R.from_euler('y', ANGULAR_STEP).as_matrix()
+                    elif key == 'j': tf_target.rotation @= R.from_euler('y', -ANGULAR_STEP).as_matrix()
+                    elif key == 'h': tf_target.rotation @= R.from_euler('z', ANGULAR_STEP).as_matrix()
+                    elif key == 'k': tf_target.rotation @= R.from_euler('z', -ANGULAR_STEP).as_matrix()
+                    elif key == 'x':
+                        print("Exiting...")
+                        break
+                
+                # 持续调用IK求解器
+                ik.solve_ik(tf_target.homogeneous)
+                time.sleep(1.0 / LOOP_RATE)
+        finally:
+            # 确保在退出时恢复终端设置
+            del kb
+
+    # --- 执行主测试函数 ---
+    main_interactive_test()

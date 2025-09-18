@@ -44,6 +44,7 @@ class Joystick:
             self.joystick_callback,
             10
         )
+        self.last_button_press_time = 0.0 
         self.hand_action = HAND_MODE[0]
         self.command_lock = threading.Lock()
         self._command = [0, 0, 0, 0]  # A, B, X, Y buttons

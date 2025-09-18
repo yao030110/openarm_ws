@@ -8,14 +8,14 @@ import yaml
 import os
 from ament_index_python.packages import get_package_share_directory
 class General_ArmController:
-    def __init__(self, node: Node):
+    def __init__(self, node: Node , config: dict ):
         print("Initialize ArmController...")
-        package_share_directory = get_package_share_directory('openarm_remote')
+        # package_share_directory = get_package_share_directory('openarm_remote')
 
-        config_path = os.path.join(package_share_directory, 'config', 'robot_control.yaml')
-        with open(config_path, 'r') as f:
-            config = yaml.safe_load(f)
-        self.robot_arm = config['robot_for_arm']
+        # config_path = os.path.join(package_share_directory, 'config', 'robot_control.yaml')
+        # with open(config_path, 'r') as f:
+        #     config = yaml.safe_load(f)
+        self.robot_arm = config
         
         self.read_joint = self.robot_arm['read_joints']
         self.node = node
@@ -41,7 +41,7 @@ class General_ArmController:
         self._init=False
         self.thread = threading.Thread(target=self._ctrl_arm, daemon=True)
         self.thread.start()
-        print("Initialize General_ArmController OK!\n")
+        print(f"Initialize {self.robot_arm['left_or_right']}_ArmController OK!\n")
 
     def _joint_state_callback(self, msg: JointState):
         
@@ -67,6 +67,8 @@ class General_ArmController:
         delta = target_q - current_q
         motion_scale = np.abs(delta) / (velocity_limit * self.control_dt)
         scale = motion_scale.max()
+        if scale > 1.5: # 仅当scale较大时打印，以避免刷屏
+            self.node.get_logger().warn(f"{self.robot_arm['left_or_right']} scale detected: {scale:.2f}. ")  
         cliped_arm_q_target = current_q + delta / max(scale, 1.0)
         return cliped_arm_q_target
     
@@ -74,7 +76,7 @@ class General_ArmController:
         rate = self.node.create_rate(1.0 / self.control_dt)
         while rclpy.ok():
             if not any(self.states['position']):
-                print("Waiting for initial arm state...")
+                print(f"Waiting for initial {self.robot_arm['left_or_right']} arm state...")
                 rate.sleep()
                 continue
             if not self._init:
