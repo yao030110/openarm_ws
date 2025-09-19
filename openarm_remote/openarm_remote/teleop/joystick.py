@@ -27,13 +27,7 @@ class Button(enum.Enum):
     LEFT_STICK_CLICK = 9
     RIGHT_STICK_CLICK = 10
     
-HAND_MODE = np.array([
-    [0, 800, 500, 1000, 1000, 1000],
-    [500, 800, 500, 1000, 1000, 1000],
-    [0, 800, 1000, 1000, 1000, 1000],
-    [0, 800, 234, 1000, 1000, 1000],
-])
-HAND_MODE = (HAND_MODE / 10).astype(np.int32)
+HAND_MODE = [0,1,2,3]
 
 class Joystick:
     def __init__(self, node: Node):
@@ -44,13 +38,13 @@ class Joystick:
             self.joystick_callback,
             10
         )
-        self.last_button_press_time = 0.0 
-        self.hand_action = HAND_MODE[0]
+        self.hand_action = 3
         self.command_lock = threading.Lock()
         self._command = [0, 0, 0, 0]  # A, B, X, Y buttons
         self.action_lock = threading.Lock()
-        self._action = np.zeros(6 + 6)  # 6 for arm control, 6 for hand control
-        self._action[:6] = self.hand_action
+        self._action = np.zeros(6 + 1)  # 6 for arm control, 6 for hand control
+        self._action[6] = self.hand_action
+        self.last_button_press_time = 0.0
     
     def joystick_callback(self, msg:Joy):
         z = msg.axes[Axis.RIGHT_STICK_Y.value]
@@ -76,7 +70,6 @@ class Joystick:
             self._action[:3] = [x, y, z]
             self._action[3:6] = [ang_x, ang_y, ang_z]
             self._action[6:] = self.hand_action
-        print(self._action[:6]) 
         
         with self.command_lock:
             self._command = [msg.buttons[Button.A.value], msg.buttons[Button.B.value], msg.buttons[Button.X.value], msg.buttons[Button.Y.value]]
@@ -89,3 +82,9 @@ class Joystick:
     def command(self):
         with self.command_lock:
             return self._command.copy()
+        
+    def set_hand_action6_value(self, hand_action_value: int):
+        with self.action_lock:
+            # 在锁的保护下，安全地修改内部状态
+            # 这里我们假设您只想修改第7个元素(索引6)
+            self._action[6] = hand_action_value

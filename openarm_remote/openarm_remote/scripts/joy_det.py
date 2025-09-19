@@ -99,7 +99,7 @@ def main(args=None):
             command = joystick.command
 
             try:
-                action_obs = node.step(arm_id=node.active_arm , action=action[:6])  
+                action_obs = node.step(arm_id=node.active_arm , action=action[:7])  
             except Exception as e:
                 pass
 
@@ -125,8 +125,8 @@ def main(args=None):
                 current_time = node.get_clock().now().nanoseconds / 1e9  # 获取当前时间（秒）
                 if current_time - joystick.last_button_press_time > 1:  # 设置0.5秒的防抖时间
                     joystick.last_button_press_time = current_time
-                    
-                    node.get_logger().info(f"Keyframe {keyframe} loaded.")
+                    joystick.set_hand_action6_value(6)
+                    joystick.hand_action = 3
                     # keyframe += 1
                     # keyframe %= len(KEYFRAMES)
                     # keyframe_data = KEYFRAMES[keyframe]

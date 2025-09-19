@@ -2,6 +2,7 @@ from rclpy.node import Node
 import rclpy
 from openarm_remote.robot_control.mod_arm import General_ArmController
 from openarm_remote.robot_control.mod_ik import General_ArmIK
+from openarm_remote.robot_control.mod_gripper import GripperController
 import numpy as np
 import time
 from scipy.spatial.transform import Rotation as R
@@ -29,13 +30,17 @@ class Robot(Node):
         config_path = os.path.join(package_share_directory, 'config', 'robot_control.yaml')
         with open(config_path, 'r') as f:
             full_config = yaml.safe_load(f)
-        # self.gripper = GripperController(self)
+        
         
         self.active_arm = "left"  # 默认启动时控制左臂
+        self.left_gripper = GripperController(self,config=full_config['left_gripper_config'])
+        self.right_gripper = GripperController(self,config=full_config['right_gripper_config'])
         self.left_ik = General_ArmIK(config=full_config['robot_left_ik'])
         self.right_ik = General_ArmIK(config=full_config['robot_right_ik'])
         self.left_arm = General_ArmController(self,config=full_config['robot_left_arm'])
         self.right_arm = General_ArmController(self,config=full_config['robot_right_arm'])
+        self.last_left_gripper_command = -1
+        self.last_right_gripper_command = -1
         
         self.left_target_ee_pose = np.zeros(3)
         self.right_target_ee_pose = np.zeros(3)
@@ -69,31 +74,31 @@ class Robot(Node):
         }
     
     def step(self,arm_id: str, action):
-        if len(action) != 6:
-            raise ValueError("Action must be of length 6")
+        if len(action) != 7:
+            raise ValueError("Action must be of length 7")
         if arm_id not in ["left", "right"]:
             raise ValueError("arm_id must be 'left' or 'right'")
 
         # 1. 根据 arm_id 选择要使用的对象和状态变量
         if arm_id == "left":
-            ik_solver = self.left_ik
-            arm_controller = self.left_arm
+            ik_solver, arm_controller, grip = self.left_ik, self.left_arm, self.left_gripper
             target_pose = self.left_target_ee_pose
             target_rot = self.left_target_ee_rot
             q = self.left_q
+            last_gripper_command = self.last_left_gripper_command
         else:  # arm_id == "right"
-            ik_solver = self.right_ik
-            arm_controller = self.right_arm
+            ik_solver, arm_controller, grip = self.right_ik, self.right_arm, self.right_gripper
             target_pose = self.right_target_ee_pose
             target_rot = self.right_target_ee_rot
             q = self.right_q
+            last_gripper_command = self.last_right_gripper_command
         # current_q = arm_controller.get_current_motor_q()
         # current_ee_pose, current_ee_rot = ik_solver.solve_fk(current_q)
         # if np.linalg.norm(target_pose - current_ee_pose) > 0.03:
         #     target_pose = current_ee_pose
         #     target_rot = current_ee_rot
             
-        new_target_pose = target_pose + action[:3] * 0.005
+        new_target_pose = target_pose + action[:3] * 0.002
         # new_target_pose = current_ee_pose + action[:3] * 0.005
         new_target_rot = (R.from_matrix(target_rot) * 
                         R.from_euler('xyz', action[3:6] * 0.01)).as_matrix()
@@ -104,19 +109,26 @@ class Robot(Node):
         new_q, _ = ik_solver.solve_ik(ee, q)
         self.get_logger().info(f"Current {arm_id} joint positions: {new_q}", throttle_duration_sec=1.0)
         arm_controller.ctrl_dual_arm(new_q)
-        # hand_msg = Joy()
-        # hand_msg.axes = [0.0] * 7  # 初始化手部动作数组
-        # hand_msg.axes[6] = action[6]  # 假设action的第7个元素是夹爪动作
-        # self.gripper.state_pub.publish(hand_msg) #发布hand的topic消息,模拟手柄
-        # self.hand_array[:] = action[6:]
+        current_gripper_command = action[6] # 获取当前的夹爪指令 (0或1)
+
+        # 检查指令是否从上一帧发生了“变化”
+        if current_gripper_command != last_gripper_command:
+            self.get_logger().info(f"Gripper command changed for '{arm_id}' arm to: {current_gripper_command}")
+            # 根据变化后的新值，执行一次性的 open() 或 close()
+            if current_gripper_command == 1:
+                grip.open()
+            elif current_gripper_command == 0:
+                grip.close()
         if arm_id == "left":
             self.left_target_ee_pose = new_target_pose
             self.left_target_ee_rot = new_target_rot
             self.left_q = new_q
+            self.last_left_gripper_command = current_gripper_command
         else:  # arm_id == "right"
             self.right_target_ee_pose = new_target_pose
             self.right_target_ee_rot = new_target_rot
             self.right_q = new_q
+            self.last_right_gripper_command = current_gripper_command
         return {
             'action.q': new_q,
             'action.ee_pose': new_target_pose,
