@@ -19,7 +19,7 @@ from ament_index_python.packages import get_package_share_directory
 class Robot(Node):
     def __init__(self):
         super().__init__("robot_node")   
-        self.declare_parameter('save_dir', '~/default_save_path')
+        self.declare_parameter('save_dir', 'recordings')
         self.declare_parameter('gripper_speed', 0.1)
         self.declare_parameter('gripper_force', 20.0)   
         self.t_position = None
@@ -51,26 +51,30 @@ class Robot(Node):
         self.left_q = np.zeros(7)
         self.right_q = np.zeros(7)
         
-    def get_observation(self):
-        s = self.mod_arm.state
-        q = s['position']
-        ee_pose, ee_rot = self.left_ik.solve_fk(q)
-        euler_angles = R.from_matrix(ee_rot).as_euler('xyz')
-        # current_gripper_state = np.array([self.gripper.gripper_state ])
-        # ee_pose_euler = np.concatenate([ee_pose, euler_angles, current_gripper_state])
-        ee_pose_euler = np.concatenate([ee_pose, euler_angles, np.array([0])])
-        # tag_tube = np.concatenate([self.t_position, self.t_rotation])
-        # table = np.concatenate([self.table_position, self.table_rotation])
+    def get_observation(self, arm_id: str):
+        if arm_id not in ["left", "right"]:
+            raise ValueError("arm_id must be 'left' or 'right'")  # 确保 arm_id 合法
+
+        # 根据 arm_id 选择对应的机械臂
+        if arm_id == "left":
+            arm_state = self.left_arm.state
+            ik_solver = self.left_ik
+        else:  # arm_id == "right"
+            arm_state = self.right_arm.state
+            ik_solver = self.right_ik
+        
+        q = arm_state['position']  # 获取当前关节角度
+        ee_pose, ee_rot = ik_solver.solve_fk(q)  # 计算末端位姿
+        euler_angles = R.from_matrix(ee_rot).as_euler('xyz')  # 转换为欧拉角表示
+        
+        ee_pose_euler = np.concatenate([ee_pose, euler_angles, np.array([0])])  # 拼接位置、欧拉角和夹爪状态
+        
         return {
-            # 'table': table,
-            # 'tag_tube' : tag_tube,
             'timestamp': time.time(),
             'ee_pose': ee_pose,
             'ee_rot': ee_rot.flatten(),
-            # **s,
-            'position': s['position'],
-            'action':  ee_pose_euler,
-            # **self.camera_states
+            'position': arm_state['position'],
+            'action': ee_pose_euler,
         }
     
     def step(self,arm_id: str, action):

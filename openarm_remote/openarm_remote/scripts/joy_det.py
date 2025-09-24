@@ -143,17 +143,11 @@ def main(args=None):
             # if not any(q):
             #     rate.sleep()
             #     continue
-            
-            # obs = node.get_observation()
-
-            # action_obs = node.step(action[:6])
-            # # action_obs = node.step(action)
-            # # node.get_logger().info(f"当前action: {action}") 
-            # obs["keyframe"] = KEYFRAMES[keyframe]['name']
-            # obs["meta"] = {
-            #     # "tag_pose": tag_pose_cache.tolist(),
-            #     # "knuckle_pose": knuckle_pose_cache.tolist(),
-            # }
+            hand_action = joystick.action
+            hand_action = hand_action[6]
+            obs = node.get_observation(node.active_arm)
+            obs['action'][6] = hand_action
+            obs['arm_id'] = [node.active_arm]
             # obs = node.avro_datum
             # obs.update()
             if recording:

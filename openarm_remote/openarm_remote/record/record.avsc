@@ -36,17 +36,10 @@
             }
         },
         {
-            "name": "tag_tube",
+            "name": "arm_id",
             "type": {
                 "type": "array",
-                "items": "double"
-            }
-        },
-        {
-            "name": "table",
-            "type": {
-                "type": "array",
-                "items": "double"
+                "items": "string"
             }
         }
     ]

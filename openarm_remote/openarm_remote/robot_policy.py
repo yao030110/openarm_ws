@@ -2,6 +2,7 @@ from rclpy.node import Node
 import rclpy
 from openarm_remote.robot_control.mod_arm import General_ArmController
 from openarm_remote.robot_control.mod_ik import General_ArmIK
+from openarm_remote.robot_control.mod_gripper import GripperController
 import numpy as np
 import time
 from scipy.spatial.transform import Rotation as R
@@ -11,237 +12,179 @@ from franka_msgs.action import Move ,Grasp
 from sensor_msgs.msg import JointState
 from rclpy.action import ActionClient
 from sensor_msgs.msg import Joy
-
-CAMERA_TOPIC = {
-    'wrist': {
-        'info': '/wrist/color/camera_info',
-        'rgb': '/wrist/color/image_rect_raw/compressed',
-        'depth': '/wrist/aligned_depth_to_color/image_raw/compressedDepth'
-    },
-    'front': {
-        'info': '/front/zed_node/rgb/camera_info',
-        'rgb': '/front/zed_node/rgb/image_rect_color/compressed',
-        'depth': '/front/zed_node/depth/depth_registered/compressedDepth'
-    }
-}
-
-
-class GripperController:
-    def __init__(self, node: Node):
-        self.node = node
-        self.current_state = None  # 存储夹爪状态
-
-        self.move_client = ActionClient(
-            node=node,                # 第一个参数：节点实例
-            action_type=Move,         # 第二个参数：action类型
-            action_name="/fr3/franka_gripper/move"  # 第三个参数：action名称
-        )
-        self.grasp_client = ActionClient(
-            node=node,
-            action_type=Grasp,
-            action_name= "/fr3/franka_gripper/grasp")
-        
-        # # 等待服务启动
-        while not self.move_client.wait_for_server(timeout_sec=1.0):
-            node.get_logger().info("等待夹爪move服务...")
-        while not self.grasp_client.wait_for_server(timeout_sec=1.0):
-            node.get_logger().info("等待夹爪grasp服务...")
-        
-        # 发布夹爪状态
-        self.state_pub = node.create_publisher(
-            Joy,
-            "/joy_replay",
-            10
-        )
-        node.get_logger().info("Franka夹爪控制器初始化完成")
-
-
-    # def joy_callback(self, msg: Joy):
-    #     """处理游戏手柄输入"""
-    #     # Joy消息的axes是浮点数数组，使用数值比较而非字符串
-    #     if msg.axes[6] == 1.0:  # 假设axes[6]为1时触发move
-    #         self.node.get_logger().info("收到张开夹爪指令")
-    #         self.move(width=0.08, speed=0.1)  # 张开到0.08米
-    #     elif msg.axes[6] == -1.0:  # 假设axes[6]为-1时触发grasp
-    #         self.node.get_logger().info("收到抓取指令")
-    #         self.grasp(width=0.02, speed=0.1, force=30.0)
-
-    def _state_callback(self, msg: JointState):
-        self.current_state = msg
-
-    # def open(self, speed: float = 0.1) -> bool:
-    #     """默认张开到0.05米（预设值）"""
-    #     return self.move(width=0.05, speed=speed)  # 固定宽度为0.05米
-
-    def grasp(self, width=0.02, speed=0.1, force=30.0):
-        goal = Grasp.Goal()
-        goal.width = width
-        goal.speed = speed
-        goal.force = force
-            # 检查动作客户端是否可用
-        if not self.grasp_client.wait_for_server(timeout_sec=1.0):
-            # self.node.get_logger().error("抓取动作服务器不可用")
-            return False
-
-        # 异步发送目标并添加回调
-        self.node.get_logger().info(f"发送抓取指令: 宽度={width}, 速度={speed}, 力={force}")
-        future = self.grasp_client.send_goal_async(
-            goal,        )
-        future.add_done_callback(self._grasp_done)
-        return True
-        
-    def move(self, width=0.08, speed=0.1):
-        goal = Move.Goal()
-        goal.width = width
-        goal.speed = speed
-            # 检查动作客户端是否可用
-        if not self.move_client.wait_for_server(timeout_sec=1.0):
-            # self.node.get_logger().error("移动动作服务器不可用")
-            return False
-
-        # 异步发送目标并添加回调
-        self.node.get_logger().info(f"发送移动指令: 宽度={width}, 速度={speed}")
-        future = self.move_client.send_goal_async(
-            goal,
-        )
-        future.add_done_callback(self._move_done)
-        return True
-    
-         
-class CameraNode:
-    def __init__(self, node: Node, name: str = "wrist"):
-        print("Initialize CameraNode...")
-        self.node = node
-        self.name = name
-        self.rgb = b''
-        self.depth = b''
-        self.rgb_sub = node.create_subscription( #传入的name的字符串名
-            CompressedImage,
-            CAMERA_TOPIC[name]['rgb'],#从CAMERA_TOPIC字典中获取对应的RGB话题
-            self._rgb_callback,
-            10
-        )
-        self.depth_pub = node.create_subscription(
-            CompressedImage,
-            CAMERA_TOPIC[name]['depth'],
-            self._depth_callback,
-            10
-        )
-        print("Initialize CameraNode OK!\n")
-    def _rgb_callback(self, msg: CompressedImage):
-        self.rgb = msg.data.tobytes()
-
-    def _depth_callback(self, msg: CompressedImage):
-        self.depth = msg.data.tobytes()
-    
-    @property
-    def state(self):
-        return {
-            'rgb': self.rgb,
-            'depth': self.depth
-        }    
+import yaml
+import os
+from ament_index_python.packages import get_package_share_directory
 
 class Robot(Node):
     def __init__(self):
-        super().__init__("robot_node")
-        self.declare_parameter('save_dir', 'recorder')
+        super().__init__("robot_node")   
+        self.declare_parameter('save_dir', 'recordings')
         self.declare_parameter('gripper_speed', 0.1)
-        self.declare_parameter('gripper_force', 20.0)
-        self.MID2_Q = np.array([0.129527314, 0.07156401,-0.42855033 ,-1.67398447 ,-0.06884267 ,1.6999068320,0.65245617])
-        # self.MID2_Q = np.array([0.2700322, 0.37613487 ,-0.4840552,-1.12117557,0.0021750048574 ,0.8132924407543829,0.65245617])
-        # 获取参数值
-        save_dir = self.get_parameter('save_dir').value
-        gripper_speed = self.get_parameter('gripper_speed').value
-        gripper_force = self.get_parameter('gripper_force').value
+        self.declare_parameter('gripper_force', 20.0)   
+        self.t_position = None
+        self.t_rotation = None
+        self.table_position = None
+        self.table_rotation = None
+        package_share_directory = get_package_share_directory('openarm_remote')
+        config_path = os.path.join(package_share_directory, 'config', 'robot_control.yaml')
+        with open(config_path, 'r') as f:
+            full_config = yaml.safe_load(f)
         
-        self.gripper = GripperController(self)
         
-        self.mod_arm = General_ArmIK(self)
-        self.mod_ik = General_ArmIK()
+        self.active_arm = "left"  # 默认启动时控制左臂
+        self.left_gripper = GripperController(self,config=full_config['left_gripper_config'])
+        self.right_gripper = GripperController(self,config=full_config['right_gripper_config'])
+        self.left_ik = General_ArmIK(config=full_config['robot_left_ik'])
+        self.right_ik = General_ArmIK(config=full_config['robot_right_ik'])
+        self.left_arm = General_ArmController(self,config=full_config['robot_left_arm'])
+        self.right_arm = General_ArmController(self,config=full_config['robot_right_arm'])
+        self.last_left_gripper_command = -1
+        self.last_right_gripper_command = -1
+        
+        self.left_target_ee_pose = np.zeros(3)
+        self.right_target_ee_pose = np.zeros(3)
 
-        self.target_ee_pose = np.zeros(3)
-        self.target_ee_rot = np.eye(3)
-        self.q = np.zeros(7)
-        #测试的时候先不用摄像头了
-        # self.wrist_camera = CameraNode(self, name="wrist")
-        # self.front_camera = CameraNode(self, name="front")
+        self.left_target_ee_rot = np.eye(3)
+        self.right_target_ee_rot = np.eye(3)
 
-    def get_observation(self):
-        s = self.mod_arm.state
-        q = s['position']
-        ee_pose, ee_rot = self.mod_ik.solve_fk(q)
-        gripper_width = self.gripper.current_state.width if self.gripper.current_state else 0.0
+        self.left_q = np.zeros(7)
+        self.right_q = np.zeros(7)
+        
+    def get_observation(self) -> dict:
+        """【最终版】一次性获取双臂的完整状态。"""
+        left_q = self.left_arm.get_current_motor_q()
+        left_ee_pose, left_ee_rot = self.left_ik.solve_fk(left_q)
+        right_q = self.right_arm.get_current_motor_q()
+        right_ee_pose, right_ee_rot = self.right_ik.solve_fk(right_q)
+        
+        return {
+            'timestamp': time.time(),
+            'left': {
+                'joint_positions': left_q, 'ee_pose': left_ee_pose, 'ee_rot_flat': left_ee_rot.flatten(),
+                'gripper_position': self.left_gripper.current_position, 'gripper_stalled': self.left_gripper.stalled
+            },
+            'right': {
+                'joint_positions': right_q, 'ee_pose': right_ee_pose, 'ee_rot_flat': right_ee_rot.flatten(),
+                'gripper_position': self.right_gripper.current_position, 'gripper_stalled': self.right_gripper.stalled
+            }
+        }
+
+    def get_R_observation(self):
+        s = self.right_arm.state  # 获取右臂状态
+        q = s['position']  # 右臂当前关节角度
+        ee_pose, ee_rot = self.right_ik.solve_fk(q)  # 计算右臂末端位姿
+        euler_angles = R.from_matrix(ee_rot).as_euler('xyz')  # 欧拉角表示
+        ee_pose_euler = np.concatenate([ee_pose, euler_angles, np.array([0])])  # 拼接位姿、欧拉角和夹爪状态
+        
         return {
             'timestamp': time.time(),
             'ee_pose': ee_pose,
             'ee_rot': ee_rot.flatten(),
-            # **s,
             'position': s['position'],
         }
     
-    def step(self, action):
-        if len(action) != 7: #回放时3+3+1
+    def step(self,action , arm_id: str = None ):
+        if len(action) != 7:
             raise ValueError("Action must be of length 7")
+        if arm_id not in ["left", "right"]:
+            raise ValueError("arm_id must be 'left' or 'right'")
 
-        self.target_ee_pose += action[:3]  # action[:3] * 0.005
+        # 1. 根据 arm_id 选择要使用的对象和状态变量
+        if arm_id == "left":
+            ik_solver, arm_controller, grip = self.left_ik, self.left_arm, self.left_gripper
+            target_pose = self.left_target_ee_pose
+            target_rot = self.left_target_ee_rot
+            q = self.left_q
+            last_gripper_command = self.last_left_gripper_command
+        else:  # arm_id == "right"
+            ik_solver, arm_controller, grip = self.right_ik, self.right_arm, self.right_gripper
+            target_pose = self.right_target_ee_pose
+            target_rot = self.right_target_ee_rot
+            q = self.right_q
+            last_gripper_command = self.last_right_gripper_command
+        # current_q = arm_controller.get_current_motor_q()
+        # current_ee_pose, current_ee_rot = ik_solver.solve_fk(current_q)
+        # if np.linalg.norm(target_pose - current_ee_pose) > 0.03:
+        #     target_pose = current_ee_pose
+        #     target_rot = current_ee_rot
+            
+        new_target_pose = target_pose + action[:3] 
+        # new_target_pose = current_ee_pose + action[:3] * 0.005
+        new_target_rot = (R.from_matrix(target_rot) * 
+                        R.from_euler('xyz', action[3:6] * 0.01)).as_matrix()
+        
+        ee = np.eye(4)
+        ee[:3, 3] = new_target_pose
+        ee[:3, :3] = new_target_rot
+        new_q, _ = ik_solver.solve_ik(ee, q)
+        self.get_logger().info(f"Current {arm_id} joint positions: {new_q}", throttle_duration_sec=1.0)
+        arm_controller.ctrl_dual_arm(new_q)
+        current_gripper_command = action[6] # 获取当前的夹爪指令 (0或1)
 
-        self.target_ee_rot = (R.from_matrix(self.target_ee_rot) *
-                              R.from_euler('xyz', action[3:6] )).as_matrix() #欧拉角解旋转矩阵
-        #R.from_euler('xyz', action[3:6] * 0.01)).as_matrix()
-        ee = np.eye(4)#单位矩阵
-        ee[:3, 3] = self.target_ee_pose
-        ee[:3, :3] = self.target_ee_rot
-        self.q, _ = self.mod_ik.solve_ik(ee, self.q)
-        self.get_logger().info(f"Current joint positions: {self.q}", throttle_duration_sec=1.0)
-        self.mod_arm.ctrl_dual_arm(self.q)
-        hand_msg = Joy()
-        hand_msg.axes = [0.0] * 7  # 初始化手部动作数组
-        hand_msg.axes[6] = action[6]  # 假设action的第7个元素是夹爪动作
-        self.gripper.state_pub.publish(hand_msg) #发布hand的topic消息,模拟手柄
-        # self.hand_array[:] = action[6:]
+        # 检查指令是否从上一帧发生了“变化”
+        if current_gripper_command != last_gripper_command:
+            self.get_logger().info(f"Gripper command changed for '{arm_id}' arm to: {current_gripper_command}")
+            # 根据变化后的新值，执行一次性的 open() 或 close()
+            if current_gripper_command == 1:
+                grip.open()
+            elif current_gripper_command == 0:
+                grip.close()
+        if arm_id == "left":
+            self.left_target_ee_pose = new_target_pose
+            self.left_target_ee_rot = new_target_rot
+            self.left_q = new_q
+            self.last_left_gripper_command = current_gripper_command
+        else:  # arm_id == "right"
+            self.right_target_ee_pose = new_target_pose
+            self.right_target_ee_rot = new_target_rot
+            self.right_q = new_q
+            self.last_right_gripper_command = current_gripper_command
         return {
-            'action': action,
-            'action.q': self.q,
-            'action.ee_pose': self.target_ee_pose,
-            'action.ee_rot': self.target_ee_rot.flatten(),
+            'action.q': new_q,
+            'action.ee_pose': new_target_pose,
         }
     
-    def reset(self, q=None, waite_time=1.0): #嵌套的函数传入q值
-        if q is None:
+    def reset(self, arm_id: str = None,q=None, waite_time=1.5):
+        if arm_id not in ["left", "right"]:
+            raise ValueError("arm_id must be 'left' or 'right'")
+        if arm_id == "left":
+            arm_controller = self.left_arm
+            ik_solver = self.left_ik
+        else: # arm_id == "right"
+            arm_controller = self.right_arm
+            ik_solver = self.right_ik
+            
+        target_q = q
+        if target_q is None:
             self._wait_for_joint_state()
+            if arm_id == "left":
+                target_q = self.left_q
+            else: # arm_id == "right"
+                target_q = self.right_q
         else:
-            self.q = q
-            self.mod_arm.ctrl_dual_arm(self.q)
-            self.target_ee_pose, self.target_ee_rot = self.mod_ik.solve_fk(self.q)
-        #这里夹爪就不松了,因为分段运行时第二次是夹钢管的,根据上一次运行完的最终态决定这一次
-        # if hand_q is not None:
-        #     self.hand_array[:] = hand_q
+            arm_controller.ctrl_dual_arm(target_q)
+
+        target_pose, target_rot = ik_solver.solve_fk(target_q)
+        if arm_id == "left":
+            self.left_q = target_q
+            self.left_target_ee_pose = target_pose
+            self.left_target_ee_rot = target_rot
+        else: # arm_id == "right"
+            self.right_q = target_q
+            self.right_target_ee_pose = target_pose
+            self.right_target_ee_rot = target_rot
         if waite_time > 0:
             self.get_logger().info(f"Waiting for {waite_time} seconds for reset...")
-            time.sleep(waite_time)
+            self.get_logger().info(f"arm_id is {arm_id} ")
+            time.sleep(waite_time)#强行等待1.5秒  
+
         return {
-            'action.q': self.q,
-            'action.ee_pose': self.target_ee_pose,
-            'action.ee_rot': self.target_ee_rot.flatten(),
+            'action.q': target_q,
+            'action.ee_pose': target_pose,
+            'action.ee_rot': target_rot.flatten(),
         }
-    def reset_noMIDQ(self, q=None, waite_time=0.0): #嵌套的函数传入q值
-        if q is None:
-            self._wait_for_joint_state()
-        else:
-            self.q = q
-            self.mod_arm.ctrl_dual_arm(self.q)
-            self.target_ee_pose, self.target_ee_rot = self.mod_ik.solve_fk(self.q)
-        #这里夹爪就不松了,因为分段运行时第二次是夹钢管的,根据上一次运行完的最终态决定这一次
-        # if hand_q is not None:
-        #     self.hand_array[:] = hand_q
-        if waite_time > 0:
-            self.get_logger().info(f"Waiting for {waite_time} seconds for reset...")
-            time.sleep(waite_time)
-        return {
-            'action.q': self.q,
-            'action.ee_pose': self.target_ee_pose,
-            'action.ee_rot': self.target_ee_rot.flatten(),
-        }
+
     @property
     def camera_states(self):
         wrist = self.wrist_camera.state
@@ -256,19 +199,23 @@ class Robot(Node):
     def start(self):
         self.get_logger().info("Hand controller started")
         self._wait_for_joint_state()
-        self.target_ee_pose, self.target_ee_rot = self.mod_ik.solve_fk(self.q)
+        self.left_target_ee_pose, self.left_target_ee_rot = self.left_ik.solve_fk(self.left_q)
+        self.right_target_ee_pose, self.right_target_ee_rot = self.right_ik.solve_fk(self.right_q)
     
     def _wait_for_joint_state(self):
         while rclpy.ok():
-            self.get_logger().info("Waiting for arm state...")
-            self.q = self.mod_arm.state['position']
-            if not np.any(self.q):
+            self.get_logger().info(f"Waiting for  arm state...")
+            self.left_q = self.left_arm.state['position']
+            self.right_q = self.right_arm.state['position']
+            if np.any(self.left_q) and np.any(self.right_q):
+                self.get_logger().info(f"  Left Arm Initial Q: {self.left_q}")
+                self.get_logger().info(f"  Right Arm Initial Q: {self.right_q}")
+                
+                # 3. 只有当两个手臂都准备好时，才跳出循环
+                break 
+            else:
                 self.get_logger().info("No initial joint positions found, waiting...")
                 time.sleep(0.03)
-                self.get_logger().info("Retrying...")
-            else:
-                self.get_logger().info(f"Current joint positions: {self.q}")
-                break
     
     def stop(self):
         self.get_logger().info("Hand controller stopped")
