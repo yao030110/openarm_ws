@@ -7,6 +7,9 @@ import rclpy
 from openarm_remote.utils.traj import TrajectoryGenerator, calculate_relative_actions
 from openarm_remote.robot_control.mod_ik import General_ArmIK
 from openarm_remote.utils.quat_delta import BaseRotationCorrector
+import yaml
+from ament_index_python.packages import get_package_share_directory
+import os
 # REPLAY_FILES = sorted(glob('/home/usyd/openarm_ws/detect_record/simple_*'))
 MID_Q = np.array([0.11010828 , 0.11387246 ,-0.22371638 ,-2.10449131 ,-0.02231137 , 2.14695302,0.65245617])
 MID2_Q = np.array([0.0386087, -0.0869798 ,-0.188516184 ,-1.69528422 ,-0.03064684 , 1.66447923,0.65245617]) #-0.8544360
@@ -31,7 +34,12 @@ class DetectPolicy:
         self.fast_trajectory_generator = TrajectoryGenerator(hand_wait_time=0.8, keyframe_wait_time=0.0,eps_min=2e-3, eps_max=3e-3, acceleration=5e-6)
         self.slow_trajectory_generator = TrajectoryGenerator(hand_wait_time=0.8, keyframe_wait_time=0.0, eps_min=1e-3, eps_max=1e-3, acceleration=5e-6)
         self.arm_id = arm_id 
-        base_path = '/home/usyd/openarm_ws/detect_record'
+        package_share_directory = get_package_share_directory('openarm_remote')
+        config_path = os.path.join(package_share_directory, 'config', 'record_path.yaml')
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        ws_path = config['files_path']['ws_path']
+        base_path = os.path.join(ws_path, "detect_record")
         if arm_id == "left":
             pattern = f"{base_path}/left_arm/simple_*"
         elif arm_id == "right":

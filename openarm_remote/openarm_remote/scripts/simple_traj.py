@@ -6,8 +6,15 @@ from rdp import rdp
 import re
 from tqdm import tqdm
 from pathlib import Path
-
-files = glob("/home/usyd/openarm_ws/recordings/record_*.avro")
+import yaml
+from ament_index_python.packages import get_package_share_directory
+import os
+package_share_directory = get_package_share_directory('openarm_remote')
+config_path = os.path.join(package_share_directory, 'config', 'record_path.yaml')
+with open(config_path, 'r') as f:
+    config = yaml.safe_load(f)
+ws_path = config['files_path']['ws_path']
+files = glob(os.path.join(ws_path, "recordings", "record_*.avro"))
 # files = glob("/home/usyd/tube_ws/drecorder/record_*.avro")
 pattern = re.compile(r"record_(\d+).avro")
 def find_hand_action_changes(action):
@@ -54,8 +61,9 @@ def simple_traj(file: str):
         action = np.array(action)
         arm_id = np.array(sample['arm_id'])
         # knuckle_pose = np.array(sample['knuckle_pose'])
-        left_traj_file = Path("/home/usyd/openarm_ws/detect_record/left_arm")
-        right_traj_file = Path("/home/usyd/openarm_ws/detect_record/right_arm")
+        traj_file = Path(ws_path) / "detect_record"
+        right_traj_file = traj_file / "right_arm"
+        left_traj_file = traj_file / "left_arm"
         if arm_id == "left":
             simple_traj_file = left_traj_file /simple_traj_file
         else:

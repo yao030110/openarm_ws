@@ -1,9 +1,16 @@
 import numpy as np
 from glob import glob
-
+import yaml
+from ament_index_python.packages import get_package_share_directory
+import os
+package_share_directory = get_package_share_directory('openarm_remote')
+config_path = os.path.join(package_share_directory, 'config', 'record_path.yaml')
+with open(config_path, 'r') as f:
+    config = yaml.safe_load(f)
+ws_path = config['files_path']['ws_path']
 # 获取所有的 replay 文件路径
-REPLAY_FILES = sorted(glob('/home/usyd/openarm_ws/detect_record/left_arm/simple_*'))
-REPLAY_FILES_R = sorted(glob('/home/usyd/openarm_ws/detect_record/right_arm/simple_*'))
+REPLAY_FILES = sorted(glob(os.path.join(ws_path, "detect_record", "left_arm", "simple_*")))
+REPLAY_FILES_R = sorted(glob(os.path.join(ws_path, "detect_record", "right_arm", "simple_*")))
 # REPLAY_FILES = sorted(glob('/home/usyd/tube_ws/drecorder/simple_*'))
 def read_replay_file(file_path):
     """
