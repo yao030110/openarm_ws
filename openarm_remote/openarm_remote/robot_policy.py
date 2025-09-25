@@ -12,134 +12,7 @@ from sensor_msgs.msg import JointState
 from rclpy.action import ActionClient
 from sensor_msgs.msg import Joy
 
-CAMERA_TOPIC = {
-    'wrist': {
-        'info': '/wrist/color/camera_info',
-        'rgb': '/wrist/color/image_rect_raw/compressed',
-        'depth': '/wrist/aligned_depth_to_color/image_raw/compressedDepth'
-    },
-    'front': {
-        'info': '/front/zed_node/rgb/camera_info',
-        'rgb': '/front/zed_node/rgb/image_rect_color/compressed',
-        'depth': '/front/zed_node/depth/depth_registered/compressedDepth'
-    }
-}
 
-
-class GripperController:
-    def __init__(self, node: Node):
-        self.node = node
-        self.current_state = None  # 存储夹爪状态
-
-        self.move_client = ActionClient(
-            node=node,                # 第一个参数：节点实例
-            action_type=Move,         # 第二个参数：action类型
-            action_name="/fr3/franka_gripper/move"  # 第三个参数：action名称
-        )
-        self.grasp_client = ActionClient(
-            node=node,
-            action_type=Grasp,
-            action_name= "/fr3/franka_gripper/grasp")
-        
-        # # 等待服务启动
-        while not self.move_client.wait_for_server(timeout_sec=1.0):
-            node.get_logger().info("等待夹爪move服务...")
-        while not self.grasp_client.wait_for_server(timeout_sec=1.0):
-            node.get_logger().info("等待夹爪grasp服务...")
-        
-        # 发布夹爪状态
-        self.state_pub = node.create_publisher(
-            Joy,
-            "/joy_replay",
-            10
-        )
-        node.get_logger().info("Franka夹爪控制器初始化完成")
-
-
-    # def joy_callback(self, msg: Joy):
-    #     """处理游戏手柄输入"""
-    #     # Joy消息的axes是浮点数数组，使用数值比较而非字符串
-    #     if msg.axes[6] == 1.0:  # 假设axes[6]为1时触发move
-    #         self.node.get_logger().info("收到张开夹爪指令")
-    #         self.move(width=0.08, speed=0.1)  # 张开到0.08米
-    #     elif msg.axes[6] == -1.0:  # 假设axes[6]为-1时触发grasp
-    #         self.node.get_logger().info("收到抓取指令")
-    #         self.grasp(width=0.02, speed=0.1, force=30.0)
-
-    def _state_callback(self, msg: JointState):
-        self.current_state = msg
-
-    # def open(self, speed: float = 0.1) -> bool:
-    #     """默认张开到0.05米（预设值）"""
-    #     return self.move(width=0.05, speed=speed)  # 固定宽度为0.05米
-
-    def grasp(self, width=0.02, speed=0.1, force=30.0):
-        goal = Grasp.Goal()
-        goal.width = width
-        goal.speed = speed
-        goal.force = force
-            # 检查动作客户端是否可用
-        if not self.grasp_client.wait_for_server(timeout_sec=1.0):
-            # self.node.get_logger().error("抓取动作服务器不可用")
-            return False
-
-        # 异步发送目标并添加回调
-        self.node.get_logger().info(f"发送抓取指令: 宽度={width}, 速度={speed}, 力={force}")
-        future = self.grasp_client.send_goal_async(
-            goal,        )
-        future.add_done_callback(self._grasp_done)
-        return True
-        
-    def move(self, width=0.08, speed=0.1):
-        goal = Move.Goal()
-        goal.width = width
-        goal.speed = speed
-            # 检查动作客户端是否可用
-        if not self.move_client.wait_for_server(timeout_sec=1.0):
-            # self.node.get_logger().error("移动动作服务器不可用")
-            return False
-
-        # 异步发送目标并添加回调
-        self.node.get_logger().info(f"发送移动指令: 宽度={width}, 速度={speed}")
-        future = self.move_client.send_goal_async(
-            goal,
-        )
-        future.add_done_callback(self._move_done)
-        return True
-    
-         
-class CameraNode:
-    def __init__(self, node: Node, name: str = "wrist"):
-        print("Initialize CameraNode...")
-        self.node = node
-        self.name = name
-        self.rgb = b''
-        self.depth = b''
-        self.rgb_sub = node.create_subscription( #传入的name的字符串名
-            CompressedImage,
-            CAMERA_TOPIC[name]['rgb'],#从CAMERA_TOPIC字典中获取对应的RGB话题
-            self._rgb_callback,
-            10
-        )
-        self.depth_pub = node.create_subscription(
-            CompressedImage,
-            CAMERA_TOPIC[name]['depth'],
-            self._depth_callback,
-            10
-        )
-        print("Initialize CameraNode OK!\n")
-    def _rgb_callback(self, msg: CompressedImage):
-        self.rgb = msg.data.tobytes()
-
-    def _depth_callback(self, msg: CompressedImage):
-        self.depth = msg.data.tobytes()
-    
-    @property
-    def state(self):
-        return {
-            'rgb': self.rgb,
-            'depth': self.depth
-        }    
 
 class Robot(Node):
     def __init__(self):
@@ -153,8 +26,6 @@ class Robot(Node):
         save_dir = self.get_parameter('save_dir').value
         gripper_speed = self.get_parameter('gripper_speed').value
         gripper_force = self.get_parameter('gripper_force').value
-        
-        self.gripper = GripperController(self)
         
         self.mod_arm = General_ArmIK(self)
         self.mod_ik = General_ArmIK()

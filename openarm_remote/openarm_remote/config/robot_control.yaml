@@ -42,3 +42,15 @@ robot_for_arm:
     - "openarm_left_joint5"
     - "openarm_left_joint6"
     - "openarm_left_joint7"
+
+gripper_config:
+  # 对应 ros2_control.yaml 中 GripperActionController 的名字
+  action_name: '/left_gripper_controller/gripper_cmd'
+  
+  # 夹爪关节在 /joint_states 中的名字 (用于状态读取)
+  joint_name: "openarm_left_finger_joint1"
+  # 默认的抓取最大力 (牛顿)
+  default_max_effort: 3.0
+  # 夹爪的行程范围 (米)
+  open_position: 0.044
+  closed_position: 0.01
