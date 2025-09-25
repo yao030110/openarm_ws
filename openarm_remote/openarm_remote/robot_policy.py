@@ -69,20 +69,6 @@ class Robot(Node):
                 'gripper_position': self.right_gripper.current_position, 'gripper_stalled': self.right_gripper.stalled
             }
         }
-
-    def get_R_observation(self):
-        s = self.right_arm.state  # 获取右臂状态
-        q = s['position']  # 右臂当前关节角度
-        ee_pose, ee_rot = self.right_ik.solve_fk(q)  # 计算右臂末端位姿
-        euler_angles = R.from_matrix(ee_rot).as_euler('xyz')  # 欧拉角表示
-        ee_pose_euler = np.concatenate([ee_pose, euler_angles, np.array([0])])  # 拼接位姿、欧拉角和夹爪状态
-        
-        return {
-            'timestamp': time.time(),
-            'ee_pose': ee_pose,
-            'ee_rot': ee_rot.flatten(),
-            'position': s['position'],
-        }
     
     def step(self,action , arm_id: str = None ):
         if len(action) != 7:
