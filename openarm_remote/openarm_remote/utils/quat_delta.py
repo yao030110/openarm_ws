@@ -1,186 +1,196 @@
 import numpy as np
 from scipy.spatial.transform import Rotation as R
-
-class BaseYawCorrector:#关于四元数求出旋转差，修补旋转矩阵的类，专为yaw_delta使用
+class BaseRotationCorrector:
     def __init__(self, decimal_precision=6):
         """
-        decimal_precision: 输出矩阵四舍五入的小数位
+        通用旋转修正器：支持绕 X、Y、Z 轴对旋转矩阵进行左乘修正。
+        所有操作均在 **世界坐标系** 下执行（左乘）。
+
+        :param decimal_precision: 输出矩阵四舍五入的小数位数
         """
         self.decimal_precision = decimal_precision
 
     @staticmethod
-    def rotation_matrix_from_yaw(yaw_rad):
-        """生成绕 Z 轴旋转的 3x3 矩阵"""
-        c, s = np.cos(yaw_rad), np.sin(yaw_rad)
+    def rotation_matrix_from_roll(roll_rad):
+        """生成绕 X 轴（滚转）的 3x3 旋转矩阵"""
+        c, s = np.cos(roll_rad), np.sin(roll_rad)
         return np.array([
-            [c, -s, 0],
-            [s,  c, 0],
-            [0,  0, 1]
+            [1,  0,  0],
+            [0,  c, -s],
+            [0,  s,  c]
         ])
+
     @staticmethod
     def rotation_matrix_from_pitch(pitch_rad):
-        """生成绕 Y 轴旋转的 3x3 矩阵"""
+        """生成绕 Y 轴（俯仰）的 3x3 旋转矩阵"""
         c, s = np.cos(pitch_rad), np.sin(pitch_rad)
         return np.array([
             [ c, 0, s],
             [ 0, 1, 0],
             [-s, 0, c]
         ])
-    def apply_yaw(self, rotation_matrices, yaw, degrees=False):
+
+    @staticmethod
+    def rotation_matrix_from_yaw(yaw_rad):
+        """生成绕 Z 轴（偏航）的 3x3 旋转矩阵"""
+        c, s = np.cos(yaw_rad), np.sin(yaw_rad)
+        return np.array([
+            [c, -s, 0],
+            [s,  c, 0],
+            [0,  0, 1]
+        ])
+
+    def _apply_axis_correction(self, rotation_matrices, angle, axis_func, degrees=False):
         """
-        rotation_matrices: n x 9
-        yaw: 单个角度/弧度 或 长度为 n 的数组
-        degrees: 是否为角度
-        返回 n x 9 修正后的旋转矩阵
-        """
-        rotation_matrices = np.asarray(rotation_matrices)
-        n = rotation_matrices.shape[0]
-
-        # 如果是单个 yaw，则扩展成 n 个
-        if np.isscalar(yaw):
-            yaw = np.full(n, yaw)
-        else:
-            yaw = np.asarray(yaw)
-            assert yaw.shape[0] == n, "yaw 数量需与矩阵行数一致"
-
-        if degrees:
-            yaw = np.deg2rad(yaw)  # 转为弧度
-
-        corrected = []
-        for i in range(n):
-            R_orig = rotation_matrices[i].reshape(3,3)
-            # original_z = R_orig[:, 2].copy()  # 保存原始Z轴
-
-            R_yaw = self.rotation_matrix_from_yaw(yaw[i])
-            R_new = R_yaw @ R_orig  # 左乘，Base 坐标系旋转
-
-            # 强制保持原始Z轴的精确值和方向
-            # R_new[:, 2] = original_z
-            
-            # 确保矩阵仍然是正交的=
-
-            R_new = np.round(R_new, self.decimal_precision)  # 精度处理
-            corrected.append(R_new.flatten())
-
-        return np.array(corrected)
-    def apply_pitch_correction(self, rotation_matrices, pitch, degrees=False):
-        """
-        修正旋转矩阵，绕 Y 轴旋转。
-        参数:
-            rotation_matrices: n x 9 旋转矩阵
-            pitch: 单个角度/弧度 或 长度为 n 的数组
-            degrees: 是否为角度
-        返回:
-            修正后的旋转矩阵
+        内部通用方法：对旋转矩阵应用绕指定轴的修正（左乘）
+        
+        :param rotation_matrices: n x 9 的数组，每个是 3x3 矩阵展平
+        :param angle: 单个值或长度为 n 的数组，表示旋转量（弧度或角度）
+        :param axis_func: 对应轴的旋转矩阵生成函数 (e.g., rotation_matrix_from_yaw)
+        :param degrees: 是否输入为角度，若为 True 则转为弧度
+        :return: n x 9 修正后的旋转矩阵
         """
         rotation_matrices = np.asarray(rotation_matrices)
         n = rotation_matrices.shape[0]
 
-        if np.isscalar(pitch):
-            pitch = np.full(n, pitch)
+        if np.isscalar(angle):
+            angles = np.full(n, angle)
         else:
-            pitch = np.asarray(pitch)
-            assert pitch.shape[0] == n, "pitch 数量需与矩阵行数一致"
+            angles = np.asarray(angle)
+            assert angles.shape[0] == n, "angle 数量必须与矩阵行数一致"
 
         if degrees:
-            pitch = np.deg2rad(pitch)  # 转为弧度
+            angles = np.deg2rad(angles)
 
         corrected = []
         for i in range(n):
             R_orig = rotation_matrices[i].reshape(3, 3)
-            R_pitch = self.rotation_matrix_from_pitch(pitch[i])
-            R_new = R_pitch @ R_orig  # 左乘，Base 坐标系旋转
+            R_delta = axis_func(angles[i])
+            R_new = R_delta @ R_orig  # 左乘：在世界坐标系下旋转
             R_new = np.round(R_new, self.decimal_precision)  # 精度处理
             corrected.append(R_new.flatten())
 
         return np.array(corrected)
-    
-    def compute_yaw_diff(self,quat_from, quat_to):
-        """
-        计算从 quat_from 到 quat_to 绕 Z 轴的 YAW 差值
 
-        参数:
-            quat_from: 记录的四元数 [ x, y, w,z]
-            quat_to:   实际的四元数 [ x, y, z,w]
-
-        返回:
-            yaw_diff: 绕 Z 轴旋转的弧度
+    def apply_roll_correction(self, rotation_matrices, roll, degrees=False):
         """
-        # 注意 scipy 的 from_quat 需要 [x, y, z, w] 顺序
+        绕 X 轴（滚转）修正旋转矩阵。
+
+        :param rotation_matrices: n x 9 的数组，每个是 3x3 矩阵展平
+        :param roll: 单个值或数组，表示绕 X 轴的旋转量（默认弧度）
+        :param degrees: 若为 True，则输入为角度
+        :return: n x 9 修正后的旋转矩阵
+        """
+        return self._apply_axis_correction(rotation_matrices, roll, self.rotation_matrix_from_roll, degrees)
+
+    def apply_pitch_correction(self, rotation_matrices, pitch, degrees=False):
+        """
+        绕 Y 轴（俯仰）修正旋转矩阵。
+
+        :param rotation_matrices: n x 9 的数组，每个是 3x3 矩阵展平
+        :param pitch: 单个值或数组，表示绕 Y 轴的旋转量（默认弧度）
+        :param degrees: 若为 True，则输入为角度
+        :return: n x 9 修正后的旋转矩阵
+        """
+        return self._apply_axis_correction(rotation_matrices, pitch, self.rotation_matrix_from_pitch, degrees)
+
+    def apply_yaw_correction(self, rotation_matrices, yaw, degrees=False):
+        """
+        绕 Z 轴（偏航）修正旋转矩阵。
+
+        :param rotation_matrices: n x 9 的数组，每个是 3x3 矩阵展平
+        :param yaw: 单个值或数组，表示绕 Z 轴的旋转量（默认弧度）
+        :param degrees: 若为 True，则输入为角度
+        :return: n x 9 修正后的旋转矩阵
+        """
+        return self._apply_axis_correction(rotation_matrices, yaw, self.rotation_matrix_from_yaw, degrees)
+
+    def compute_rotation_diff(self, quat_from, quat_to, axis='z', degrees=False):
+        """
+        计算从 quat_from 到 quat_to 在指定轴上的旋转差值（仅提取该轴分量）
+
+        :param quat_from: 原始四元数 [x, y, z, w]
+        :param quat_to: 目标四元数 [x, y, z, w]
+        :param axis: 'x' / 'y' / 'z' —— 指定要提取的旋转轴
+        :param degrees: 是否返回角度而非弧度
+        :return: 单个角度值（弧度或角度）
+        """
         r_from = R.from_quat(quat_from)
         r_to   = R.from_quat(quat_to)
 
-        # 转换为欧拉角 (roll, pitch, yaw)
         euler_from = r_from.as_euler('xyz', degrees=False)
         euler_to   = r_to.as_euler('xyz', degrees=False)
 
-        yaw_diff = euler_to[2] - euler_from[2]  # z轴旋转差值
+        axis_map = {'x': 0, 'y': 1, 'z': 2}
+        if axis not in axis_map:
+            raise ValueError("axis must be 'x', 'y', or 'z'")
 
-        # 可选：将角度限制在 [-pi, pi] 范围
-        yaw_diff = (yaw_diff + np.pi) % (2 * np.pi) - np.pi
+        diff = euler_to[axis_map[axis]] - euler_from[axis_map[axis]]
+        # 归一化到 [-π, π]
+        diff = (diff + np.pi) % (2 * np.pi) - np.pi
 
-        return yaw_diff
-    
-    # def apply_translation_correction(self, translation, yaw_diff):
-    #     """
-    #     修正平移量根据yaw_diff旋转
-    #     参数:
-    #         translation: 原始平移 [x, y, z]
-    #         yaw_diff: 绕 Z 轴的旋转差值（弧度）
-    #     返回:
-    #         修正后的平移
-    #     """
-    #     # 创建旋转矩阵
-    #     R_yaw = self.rotation_matrix_from_yaw(-yaw_diff)
-    #     # 对平移进行旋转
-    #     corrected_translation = R_yaw @ translation
-    #     return corrected_translation
-    def apply_translation_correction(self, translation, yaw_diff):
+        if degrees:
+            diff = np.rad2deg(diff)
+
+        return diff
+
+    def apply_translation_correction(self, translation, angle, axis='z', degrees=False):
         """
-        修正平移量根据yaw_diff旋转
-        参数:
-            translation: 原始平移 [x, y, z] 或 n×3 的数组
-            yaw_diff: 绕 Z 轴的旋转差值（弧度），可以是标量或与translation行数相同的数组
-        返回:
-            修正后的平移
+        根据指定轴的旋转差值，修正平移向量（反向旋转）
+
+        :param translation: n×3 或 3 维平移向量
+        :param angle: 旋转差值（弧度或角度）
+        :param axis: 'x', 'y', 'z'
+        :param degrees: 输入是否为角度
+        :return: 修正后的平移向量
         """
         translation = np.atleast_2d(translation)
         n = translation.shape[0]
-        
-        if np.isscalar(yaw_diff):
-            yaw_diffs = np.full(n, -yaw_diff)
+
+        if np.isscalar(angle):
+            angles = np.full(n, angle)
         else:
-            yaw_diffs = -np.asarray(yaw_diff)
-            if len(yaw_diffs) != n:
-                raise ValueError("yaw_diff的长度必须与translation的行数相同")
-        
-        corrected_translation = np.empty_like(translation)
-        
+            angles = np.asarray(angle)
+            if len(angles) != n:
+                raise ValueError("angle 长度必须与 translation 行数一致")
+
+        if degrees:
+            angles = np.deg2rad(angles)
+
+        axis_map = {'x': self.rotation_matrix_from_roll,
+                    'y': self.rotation_matrix_from_pitch,
+                    'z': self.rotation_matrix_from_yaw}
+
+        if axis not in axis_map:
+            raise ValueError("axis must be 'x', 'y', or 'z'")
+
+        corrected = np.empty_like(translation)
         for i in range(n):
-            R_yaw = self.rotation_matrix_from_yaw(yaw_diffs[i])
-            corrected_translation[i] = R_yaw @ translation[i]
-        
-        if corrected_translation.shape[0] == 1:
-            return corrected_translation[0]
-        return corrected_translation
+            R_delta = axis_map[axis](-angles[i])  # 反向旋转以补偿
+            corrected[i] = R_delta @ translation[i]
+
+        if corrected.shape[0] == 1:
+            return corrected[0]
+        return corrected
     
 # ------------------ 示例 ------------------
-rotation_matrices = np.array([
-    [1,0,0, 0,1,0, 0,0,1],
-    [0,-1,0, 1,0,0, 0,0,1]
-])
-a = [0, 0, 0, 1]  # 单位四元数 [x, y, z, w]
-b = [0, 0, 0.7071, 0.7071]  # 绕Z轴90度 [x, y, z, w]
-corrector = BaseYawCorrector()
-yaw_diff = corrector.compute_yaw_diff(a, b)  # 角度
+if __name__ == "__main__":
+    rotation_matrices = np.array([
+        [1,0,0, 0,1,0, 0,0,1],
+        [0,-1,0, 1,0,0, 0,0,1]
+    ])
+    a = [0, 0, 0, 1]  # 单位四元数 [x, y, z, w]
+    b = [0, 0, 0.7071, 0.7071]  # 绕Z轴90度 [x, y, z, w]
+    corrector = BaseRotationCorrector(decimal_precision=6)
+    yaw_diff = corrector.compute_rotation_diff(a, b , axis='z', degrees=True)  # 角度
 
-corrected_matrices = corrector.apply_yaw(rotation_matrices, yaw_diff)
+    corrected_matrices = corrector.apply_yaw_correction(rotation_matrices, yaw_diff, degrees=True)
 
-translation = np.array([[1.0, -2.0, 10.0],
-                       [1.0, -2.0, 10.0]])
+    translation = np.array([[1.0, -2.0, 10.0],
+                        [1.0, -2.0, 10.0]])
 
-# 根据yaw_diff修正平移
-corrected_translation = corrector.apply_translation_correction(translation, yaw_diff)
+    # 根据yaw_diff修正平移
+    corrected_translation = corrector.apply_translation_correction(translation, yaw_diff,degrees=True)
 
-print("修正后的旋转矩阵：", corrected_matrices)
-print("修正后的平移：", corrected_translation)
+    print("修正后的旋转矩阵：", corrected_matrices)
+    print("修正后的平移：", corrected_translation)

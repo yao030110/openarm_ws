@@ -194,10 +194,10 @@ class Robot(Node):
         self.q, _ = self.mod_ik.solve_ik(ee, self.q)
         self.get_logger().info(f"Current joint positions: {self.q}", throttle_duration_sec=1.0)
         self.mod_arm.ctrl_dual_arm(self.q)
-        hand_msg = Joy()
-        hand_msg.axes = [0.0] * 7  # 初始化手部动作数组
-        hand_msg.axes[6] = action[6]  # 假设action的第7个元素是夹爪动作
-        self.gripper.state_pub.publish(hand_msg) #发布hand的topic消息,模拟手柄
+        # hand_msg = Joy()
+        # hand_msg.axes = [0.0] * 7  # 初始化手部动作数组
+        # hand_msg.axes[6] = action[6]  # 假设action的第7个元素是夹爪动作
+        # self.gripper.state_pub.publish(hand_msg) #发布hand的topic消息,模拟手柄
         # self.hand_array[:] = action[6:]
         return {
             'action': action,

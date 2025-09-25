@@ -62,130 +62,17 @@ class DetectPolicy:
     
     def post_reset(self, obs):
         target_pose, target_rot = obs['action.ee_pose'], obs['action.ee_rot'].reshape(3, 3)#是simp文件和
-        base_table = self.data['table']#之前记录的table_base
-        base_tag_pose = base_table[:3].reshape(-1)
-        base_tag_Yaw = base_table[3:].reshape(-1)
-        base_knuckle = self.data['tag_tube']#记录的钢管位置,xyz位置+xyzw四元数
-        base_knuckle_pose = base_knuckle[:3].reshape(-1) #只取位置信息变成np数组
-        base_Yaw =  base_knuckle[3:].reshape(-1)
         ee_pose_t = self.data['ee_pose']#末端位姿
         ee_rot_t = self.data['ee_rot'] #33旋转矩阵
-        action_t = self.data['action'].reshape(-1, 1)#原先是手，现在是夹爪,这里的action是优化过的，只跟hand相关
+        # action_t = self.data['action'].reshape(-1, 1)#原先是手，现在是夹爪,这里的action是优化过的，只跟hand相关
+        action_t = np.array([0.0]).reshape(-1, 1) 
         
         delta = np.zeros(3,dtype = float)
         y_delta = [0,0,0,0]
-        if self.frame == 0:
-            while rclpy.ok():#查询table_base和tag_frame之间的变换
-                try:
-                    tag_tf = self.tf2_buffer.lookup_transform(
-                         "fake_table_base",'table_base', rclpy.time.Time(), rclpy.duration.Duration(seconds=1))
-                    
-                    now = self.node.get_clock().now().to_msg()
-                    tf_time = tag_tf.header.stamp
-                    dt = (rclpy.time.Time.from_msg(now) - rclpy.time.Time.from_msg(tf_time)).nanoseconds * 1e-9
-
-                    if dt > 0.8:
-                        self.node.get_logger().warn(
-                            f"TF too old (age={dt:.3f}s), waiting for a fresh one..."
-                        )
-                        time.sleep(0.1)
-                        continue
-                    
-                    t = tag_tf.transform.translation
-                    q = tag_tf.transform.rotation
-                    tag_pose = np.array([t.x, t.y, t.z])
-                    tag_quat = np.array([q.x, q.y, q.z,q.w])
-                    self.tag_pose = tag_pose
-                    self.tag_quat = tag_quat
-                    self.node.get_logger().info(f"Tag pose: {self.tag_pose}")
-                    self.node.get_logger().info(f"Tag_quat: {self.tag_quat}")
-                    break
-                except tf2_ros.LookupException:
-                    self.node.get_logger().warn("Transform fr3_table_base->tag_frame not yet available, retrying...")
-                    time.sleep(0.5)
-            self.table_delta = -(self.tag_pose - base_tag_pose)
-            self.y_tag_delta = self.Rcor.compute_rotation_diff(base_tag_Yaw,self.tag_quat , axis='z')
-            while rclpy.ok():
-                try:
-                    knuckle_tf = self.tf2_buffer.lookup_transform(
-                        "fake_tag", 'detected_target', rclpy.time.Time(), rclpy.duration.Duration(seconds=1))
-                    
-                    now = self.node.get_clock().now().to_msg()
-                    tf_time = knuckle_tf.header.stamp
-                    dt = (rclpy.time.Time.from_msg(now) - rclpy.time.Time.from_msg(tf_time)).nanoseconds * 1e-9
-
-                    if dt > 0.8:
-                        self.node.get_logger().warn(
-                            f"TF too old (age={dt:.3f}s), waiting for a fresh one..."
-                        )
-                        time.sleep(0.1)
-                        continue
-                    
-                    t = knuckle_tf.transform.translation
-                    q = knuckle_tf.transform.rotation
-                    knuckle_pose = np.array([t.x, t.y, t.z])
-                    knuckle_quat = np.array([q.x, q.y, q.z,q.w])
-                    self.knuckle_pose = knuckle_pose
-                    self.knuckle_quat = knuckle_quat
-                    self.read_tag = np.array([t.x, t.y, t.z, q.x, q.y, q.z, q.w])
-                    self.node.get_logger().info(
-                        f"Knuckle pose: {self.knuckle_pose}")
-                    break
-                except tf2_ros.LookupException:
-                    self.node.get_logger().warn(
-                        "Transform fake_tag->detected_target not yet available, retrying...")
-                    time.sleep(0.5)
-            delta = self.knuckle_pose - base_knuckle_pose #现在读到的跟之前记录的delta,只用base_knuckle_pose前三个
-            y_delta = self.Rcor.compute_rotation_diff(base_Yaw,self.knuckle_quat,axis='z')#计算绕z轴的旋转差值
-            pi_over_2 = np.pi/2 
-            if y_delta > pi_over_2 :
-                y_delta -= np.pi
-                self.step2_turn = 1
-            elif y_delta < -pi_over_2:
-                y_delta += np.pi
-                self.step2_turn = 1
-            else:
-                self.step2_turn = 0
-            print(f"KNUCKLE {delta} {self.knuckle_pose} {base_knuckle_pose}{y_delta}")
-            # delta[0], delta[1],delta[2] =  -delta[0],delta[1],-delta[2] #z轴相反，是 -delta[2]
-        elif self.frame == 3:
-            self.num_steel +=1 
-            if self.num_steel >= 3:
-                delta[1] = -0.04 * (self.num_steel-3)
-                delta[2] = 0.01 +0.025
-            else :
-                delta[1] = -0.04 * self.num_steel
-                delta[2] = 0.01
-        else:
-            print(f"KNUCKLE {delta} {self.knuckle_pose} {base_knuckle_pose}")
         
-        if self.frame == 0:
-            # delta[2] = 0.005#0.005 * np.random.uniform(0.8, 1.2)
-            # delta[1] = 0.00
-            ee_rot_t = self.Rcor.apply_yaw_correction(ee_rot_t, y_delta-self.y_tag_delta)
-            # delta[2] -= 0.003
-        if self.frame == 1:
-            delta[2] = 0.008#0.005 * np.random.uniform(0.8, 1.0)
-            # delta[0] -= 0.02
-            if self.step2_turn == 1:
-                ee_rot_t = self.Rcor.apply_yaw_correction(ee_rot_t, -np.pi-self.y_tag_delta)
-            
-            ee_rot_t = self.Rcor.apply_pitch_correction(ee_rot_t, -15 ,degrees=True)
-            target_rot = self.Rcor.apply_pitch_correction(target_rot, -15 ,degrees=True)
-
-        if self.frame == 2:
-            # delta[2] += 0.005#0.005 * np.random.uniform(0.8, 1.0)
-            # delta[0] -= 0.025
-            if self.step2_turn == 1:
-                ee_rot_t = self.Rcor.apply_yaw_correction(ee_rot_t, -np.pi-self.y_tag_delta)
-                
-        if self.frame == 3:
-            if self.step2_turn == 1:
-                ee_rot_t = self.Rcor.apply_yaw_correction(ee_rot_t, np.pi-self.y_tag_delta)
         print("Delta", delta)
         delta += self.table_delta
         ee_pose_t += delta[None, :]
-        ee_pose_t = self.Rcor.apply_translation_correction(ee_pose_t, self.y_tag_delta)#加上tag_base旋转的平移修正
         ee_rot_t = ee_rot_t.reshape(-1, 3, 3)
         
         if self.frame == 0:
