@@ -27,7 +27,7 @@ class Robot(Node):
         gripper_speed = self.get_parameter('gripper_speed').value
         gripper_force = self.get_parameter('gripper_force').value
         
-        self.mod_arm = General_ArmIK(self)
+        self.mod_arm = General_ArmController(self)
         self.mod_ik = General_ArmIK()
 
         self.target_ee_pose = np.zeros(3)
@@ -41,7 +41,7 @@ class Robot(Node):
         s = self.mod_arm.state
         q = s['position']
         ee_pose, ee_rot = self.mod_ik.solve_fk(q)
-        gripper_width = self.gripper.current_state.width if self.gripper.current_state else 0.0
+        # gripper_width = self.gripper.current_state.width if self.gripper.current_state else 0.0
         return {
             'timestamp': time.time(),
             'ee_pose': ee_pose,

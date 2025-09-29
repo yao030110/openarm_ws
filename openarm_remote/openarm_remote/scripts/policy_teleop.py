@@ -5,6 +5,9 @@ from rclpy.executors import MultiThreadedExecutor
 import threading
 from multiprocessing import Process, Array
 from openarm_remote.record.recorder import Recorder
+import openarm_remote.policy
+print(openarm_remote.policy.__file__)
+
 from openarm_remote.policy.det_policy import DetectPolicy
 from openarm_remote.robot_policy import Robot
 import numpy as np
@@ -42,7 +45,7 @@ def main(args=None, hand_array=None, hand_state=None):
                 # 捕获其他可能的规划错误
                 node.get_logger().error(f"An unexpected error occurred while planning for LEFT arm: {e}")
 
-            node.get_logger().info(f"Replay frame {frame}. Arm: {len(arm_actions)} actions")
+            node.get_logger().info(f"Replay frame {frame}. Arm: {len(arm_actions)} ")
         
             
             # --- 2. 执行阶段 (在这里实现多线程同步) ---
@@ -61,7 +64,7 @@ def main(args=None, hand_array=None, hand_state=None):
                     
             input("Press Enter to continue...") # 如果需要可以取消注释
             # 为左右臂分别创建工作线程
-            arm_thread = threading.Thread(target=replay_worker, args=( arm_actions))
+            arm_thread = threading.Thread(target=replay_worker, args=( arm_actions,))
 
             # 同时启动两个线程
             arm_thread.start()

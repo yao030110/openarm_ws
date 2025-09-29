@@ -59,7 +59,6 @@ def simple_traj(file: str):
         ee_pose = np.array(ee_pose)
         ee_rot = np.array(ee_rot)
         action = np.array(action)
-        arm_id = np.array(sample['arm_id'])
         # knuckle_pose = np.array(sample['knuckle_pose'])
         # traj_file = Path("/home/usyd/aubo_ws/detect_record")
         traj_file = Path(ws_path) / "detect_record"
@@ -89,7 +88,7 @@ def simple_traj(file: str):
         
         ee_pose_mask = ee_pose_mask | hand_action_changes
         #
-        np.savez_compressed(simple_traj_file, ee_pose=ee_pose[ee_pose_mask], ee_rot=ee_rot[ee_pose_mask], action=action[ee_pose_mask], arm_id=arm_id)
+        np.savez_compressed(simple_traj_file, ee_pose=ee_pose[ee_pose_mask], ee_rot=ee_rot[ee_pose_mask], action=action[ee_pose_mask])
         print(f"Saved simplified trajectory to {simple_traj_file}")
     except Exception as e:
         print(f"Error processing file {file}: {e}")

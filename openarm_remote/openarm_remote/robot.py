@@ -15,7 +15,7 @@ from sensor_msgs.msg import Joy
 class Robot(Node):
     def __init__(self):
         super().__init__("robot_node")   
-        self.declare_parameter('save_dir', '~/default_save_path')
+        self.declare_parameter('save_dir', 'recordings')
         self.declare_parameter('gripper_speed', 0.1)
         self.declare_parameter('gripper_force', 20.0)   
         self.t_position = None

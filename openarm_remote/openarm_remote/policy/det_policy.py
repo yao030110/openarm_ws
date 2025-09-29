@@ -74,13 +74,12 @@ class DetectPolicy:
         ee_pose_t = self.data['ee_pose']#末端位姿
         ee_rot_t = self.data['ee_rot'] #33旋转矩阵
         # action_t = self.data['action'].reshape(-1, 1)#原先是手，现在是夹爪,这里的action是优化过的，只跟hand相关
-        action_t = np.array([0.0]).reshape(-1, 1) 
+        action_t = self.data['action'].reshape(-1, 1) 
         
         delta = np.zeros(3,dtype = float)
         y_delta = [0,0,0,0]
         
         print("Delta", delta)
-        delta += self.table_delta
         ee_pose_t += delta[None, :]
         ee_rot_t = ee_rot_t.reshape(-1, 3, 3)
         
@@ -134,6 +133,6 @@ class DetectPolicy:
         )
 
         self.actions = np.vstack([mid_fast_actions, actions ])
-
+        return self.actions
         # self.actions[:, :3] /= 0.005
         # self.actions[:, 3:6] /= 0.01
